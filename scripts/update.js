@@ -2,7 +2,7 @@ import fs from "fs";
 import ical from "ical-generator";
 import { chromium } from "playwright";
 
-const EVENTS_URL = "https://www.bkfc.com/events";
+const EVENTS_INDEX = "https://www.bkfc.com/events";
 
 async function run() {
   const calendar = ical({ name: "BKFC Events" });
@@ -10,37 +10,49 @@ async function run() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
 
-  await page.goto(EVENTS_URL, { waitUntil: "networkidle" });
+  // Load events index
+  await page.goto(EVENTS_INDEX, { waitUntil: "networkidle" });
 
-  // Wait for event cards to appear
-  await page.waitForSelector("time[datetime]", { timeout: 15000 });
+  // Wait for event links (this IS reliable)
+  await page.waitForSelector("a[href^='/events/']", { timeout: 20000 });
 
-  const events = await page.$$eval("a[href^='/events/']", links =>
-    links.map(link => {
-      const timeEl = link.querySelector("time[datetime]");
-      const titleEl = link.querySelector("h1, h2, h3");
-
-      if (!timeEl || !titleEl) return null;
-
-      return {
-        title: titleEl.textContent.trim(),
-        datetime: timeEl.getAttribute("datetime"),
-        url: "https://www.bkfc.com" + link.getAttribute("href")
-      };
-    }).filter(Boolean)
+  // Get unique event URLs
+  const eventLinks = await page.$$eval(
+    "a[href^='/events/']",
+    links =>
+      [...new Set(
+        links
+          .map(a => a.getAttribute("href"))
+          .filter(h => h && h.startsWith("/events/"))
+      )]
   );
 
-  for (const event of events) {
-    const start = new Date(event.datetime);
-    const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
+  for (const href of eventLinks) {
+    const eventUrl = "https://www.bkfc.com" + href;
 
-    calendar.createEvent({
-      summary: event.title,
-      start,
-      end,
-      description: `Official BKFC Event\n\n${event.url}`,
-      url: event.url
-    });
+    try {
+      await page.goto(eventUrl, { waitUntil: "networkidle" });
+
+      // Event pages DO contain <time datetime>
+      const datetime = await page.getAttribute("time", "datetime");
+      const title = await page.textContent("h1");
+
+      if (!datetime || !title) continue;
+
+      const start = new Date(datetime);
+      const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
+
+      calendar.createEvent({
+        summary: title.trim(),
+        start,
+        end,
+        description: `Official BKFC Event\n\n${eventUrl}`,
+        url: eventUrl
+      });
+    } catch {
+      // Skip broken or placeholder pages
+      continue;
+    }
   }
 
   await browser.close();
