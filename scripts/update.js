@@ -1,58 +1,46 @@
+import axios from "axios";
 import fs from "fs";
 import ical from "ical-generator";
-import { chromium } from "playwright";
 
 const EVENTS_URL = "https://www.bkfc.com/events";
 
-function parseBKFCDate(text) {
-  // Example: "FEBRUARY 7, 2026 7:00 PM EST"
-  return new Date(text);
+function extractJSON(html) {
+  const match = html.match(/<script[^>]*type="application\/json"[^>]*>(.*?)<\/script>/s);
+  if (!match) return null;
+
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
 }
 
 async function run() {
   const calendar = ical({ name: "BKFC Events" });
 
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  const { data: html } = await axios.get(EVENTS_URL);
+  const json = extractJSON(html);
 
-  await page.goto(EVENTS_URL, { waitUntil: "networkidle" });
+  if (!json || !json.events) {
+    console.error("No events found in embedded JSON");
+    return;
+  }
 
-  // Each event card has a "SEE EVENT" button
-  const events = await page.$$eval("a:has-text('SEE EVENT')", buttons =>
-    buttons.map(btn => {
-      const card = btn.closest("div");
+  for (const event of json.events) {
+    if (!event.startDate || !event.title) continue;
 
-      const title =
-        card.querySelector("h1, h2, h3")?.textContent.trim() || null;
-
-      const dateText = Array.from(card.querySelectorAll("div, span"))
-        .map(el => el.textContent.trim())
-        .find(t => /AM|PM/.test(t));
-
-      const url = btn.href;
-
-      if (!title || !dateText || !url) return null;
-
-      return { title, dateText, url };
-    }).filter(Boolean)
-  );
-
-  for (const event of events) {
-    const start = parseBKFCDate(event.dateText);
-    if (isNaN(start)) continue;
-
+    const start = new Date(event.startDate);
     const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
 
     calendar.createEvent({
       summary: event.title,
       start,
       end,
-      description: `Official BKFC Event\n\n${event.url}`,
-      url: event.url
+      location: event.venue || "",
+      description: `Official BKFC Event\n\nhttps://www.bkfc.com/events/${event.slug}`,
+      url: `https://www.bkfc.com/events/${event.slug}`
     });
   }
-
-  await browser.close();
 
   fs.mkdirSync("public", { recursive: true });
   fs.writeFileSync("public/BKFC.ics", calendar.toString());
