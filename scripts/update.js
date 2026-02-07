@@ -1,38 +1,49 @@
-import axios from "axios";
 import fs from "fs";
 import ical from "ical-generator";
-import * as cheerio from "cheerio";
+import { chromium } from "playwright";
 
 const EVENTS_URL = "https://www.bkfc.com/events";
 
 async function run() {
   const calendar = ical({ name: "BKFC Events" });
 
-  const { data } = await axios.get(EVENTS_URL);
-  const $ = cheerio.load(data);
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
 
-  $("time[datetime]").each((_, timeEl) => {
-    const datetime = $(timeEl).attr("datetime");
-    if (!datetime) return;
+  await page.goto(EVENTS_URL, { waitUntil: "networkidle" });
 
-    const card = $(timeEl).parents("a").first();
-    const href = card.attr("href");
-    if (!href || !href.startsWith("/events/")) return;
+  // Wait for event cards to appear
+  await page.waitForSelector("time[datetime]", { timeout: 15000 });
 
-    const title = card.find("h1, h2, h3").first().text().trim();
-    if (!title) return;
+  const events = await page.$$eval("a[href^='/events/']", links =>
+    links.map(link => {
+      const timeEl = link.querySelector("time[datetime]");
+      const titleEl = link.querySelector("h1, h2, h3");
 
-    const start = new Date(datetime);
+      if (!timeEl || !titleEl) return null;
+
+      return {
+        title: titleEl.textContent.trim(),
+        datetime: timeEl.getAttribute("datetime"),
+        url: "https://www.bkfc.com" + link.getAttribute("href")
+      };
+    }).filter(Boolean)
+  );
+
+  for (const event of events) {
+    const start = new Date(event.datetime);
     const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
 
     calendar.createEvent({
-      summary: title,
+      summary: event.title,
       start,
       end,
-      description: `Official BKFC Event\n\nhttps://www.bkfc.com${href}`,
-      url: `https://www.bkfc.com${href}`
+      description: `Official BKFC Event\n\n${event.url}`,
+      url: event.url
     });
-  });
+  }
+
+  await browser.close();
 
   fs.mkdirSync("public", { recursive: true });
   fs.writeFileSync("public/BKFC.ics", calendar.toString());
