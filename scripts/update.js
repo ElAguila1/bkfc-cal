@@ -9,7 +9,7 @@ const TAPOLOGY_URL =
 async function run() {
   const calendar = ical({ name: "BKFC Events (Tapology)" });
 
-  const response = await axios.get(TAPOLOGY_URL, {
+  const { data: html } = await axios.get(TAPOLOGY_URL, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari",
@@ -17,26 +17,29 @@ async function run() {
     }
   });
 
-  const html = response.data;
-
-  // 🔴 DEBUG: confirm what page we received
-  console.log("HTML length:", html.length);
-  console.log("HTML preview:", html.slice(0, 500));
-
   const $ = cheerio.load(html);
 
   let count = 0;
 
-  $("table tr").each((_, row) => {
-    const titleLink = $(row).find("a[href^='/fightcenter/events/']");
-    const dateText = $(row).find("td").eq(0).text().trim();
+  // Tapology lists upcoming events as links to /fightcenter/events/...
+  $("a[href^='/fightcenter/events/']").each((_, el) => {
+    const title = $(el).text().trim();
+    const link = "https://www.tapology.com" + $(el).attr("href");
 
-    if (!titleLink.length || !dateText) return;
+    if (!title) return;
 
-    const title = titleLink.text().trim();
-    const link = "https://www.tapology.com" + titleLink.attr("href");
+    // The date is usually nearby (same list item)
+    const container = $(el).closest("li, div");
+    const dateText = container.text();
 
-    const start = new Date(dateText);
+    // Example: "Sat, Feb 7, 2026"
+    const dateMatch = dateText.match(
+      /(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}/
+    );
+
+    if (!dateMatch) return;
+
+    const start = new Date(dateMatch[0]);
     if (isNaN(start)) return;
 
     const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
@@ -52,7 +55,7 @@ async function run() {
     count++;
   });
 
-  console.log("Parsed events:", count);
+  console.log(`Tapology events added: ${count}`);
 
   fs.mkdirSync("public", { recursive: true });
   fs.writeFileSync("public/BKFC.ics", calendar.toString());
