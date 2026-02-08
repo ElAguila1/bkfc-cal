@@ -3,13 +3,13 @@ import * as cheerio from "cheerio";
 import fs from "fs";
 import ical from "ical-generator";
 
-const TAPOLOGY_URL =
-  "https://www.tapology.com/fightcenter/promotions/2682-bare-knuckle-fighting-championship-bnfc";
+const TAPOLOGY_EVENTS_URL =
+  "https://www.tapology.com/fightcenter/events?organization=2682";
 
 async function run() {
   const calendar = ical({ name: "BKFC Events (Tapology)" });
 
-  const { data: html } = await axios.get(TAPOLOGY_URL, {
+  const { data: html } = await axios.get(TAPOLOGY_EVENTS_URL, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari",
@@ -21,19 +21,16 @@ async function run() {
 
   let count = 0;
 
-  // Tapology lists upcoming events as links to /fightcenter/events/...
   $("a[href^='/fightcenter/events/']").each((_, el) => {
     const title = $(el).text().trim();
     const link = "https://www.tapology.com" + $(el).attr("href");
 
     if (!title) return;
 
-    // The date is usually nearby (same list item)
-    const container = $(el).closest("li, div");
-    const dateText = container.text();
+    const row = $(el).closest("tr, li, div");
+    const text = row.text();
 
-    // Example: "Sat, Feb 7, 2026"
-    const dateMatch = dateText.match(
+    const dateMatch = text.match(
       /(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}/
     );
 
