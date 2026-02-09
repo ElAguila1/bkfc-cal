@@ -6,8 +6,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -17,6 +15,7 @@ jobs:
           node-version: 20
 
       - run: npm install
+      - run: npx playwright install --with-deps
       - run: npm run update
 
       - run: |
