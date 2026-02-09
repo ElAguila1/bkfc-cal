@@ -1,6 +1,32 @@
 BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//sebbo.net//ical-generator//EN
-NAME:BKFC Events (Tapology)
-X-WR-CALNAME:BKFC Events (Tapology)
+NAME:BKFC Events
+X-WR-CALNAME:BKFC Events
+BEGIN:VEVENT
+UID:00ba7a63-07d9-4176-adf3-c8abac9b34dd
+SEQUENCE:0
+DTSTAMP:20260209T041223Z
+DTSTART:20260328T220000Z
+DTEND:20260329T020000Z
+SUMMARY:BKFC Presents Bare Knuckle Fighting
+LOCATION:Mohegan Sun Arena\, Uncasville\, CT
+DESCRIPTION:https://www.ticketmaster.com/bkfc-presents-bare-knuckle-fighti
+ ng-uncasville-connecticut-03-28-2026/event/1D00642895611801
+URL;VALUE=URI:https://www.ticketmaster.com/bkfc-presents-bare-knuckle-figh
+ ting-uncasville-connecticut-03-28-2026/event/1D00642895611801
+END:VEVENT
+BEGIN:VEVENT
+UID:b78ae275-a68d-455b-aa17-16f9478103f3
+SEQUENCE:0
+DTSTAMP:20260209T041223Z
+DTSTART:20260328T230000Z
+DTEND:20260329T030000Z
+SUMMARY:Foxwoods Fight Night - Bare Knuckle Boxing 52
+LOCATION:Premier Theater at Foxwoods Resort Casino\, Mashantucket\, CT
+DESCRIPTION:https://www.ticketmaster.com/foxwoods-fight-night-bare-knuckle
+ -boxing-mashantucket-connecticut-03-28-2026/event/1D00638AE666666B
+URL;VALUE=URI:https://www.ticketmaster.com/foxwoods-fight-night-bare-knuck
+ le-boxing-mashantucket-connecticut-03-28-2026/event/1D00638AE666666B
+END:VEVENT
 END:VCALENDAR
