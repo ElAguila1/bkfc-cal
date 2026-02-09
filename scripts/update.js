@@ -1,58 +1,63 @@
-import axios from "axios";
-import * as cheerio from "cheerio";
 import fs from "fs";
 import ical from "ical-generator";
+import fetch from "node-fetch";
 
-const TAPOLOGY_EVENTS_URL =
-  "https://www.tapology.com/fightcenter/events?organization=2682";
+const API_KEY = process.env.TICKETMASTER_API_KEY;
+
+// Search Ticketmaster for BKFC events
+const SEARCH_URL =
+  "https://app.ticketmaster.com/discovery/v2/events.json" +
+  "?keyword=Bare%20Knuckle" +
+  "&classificationName=Sports" +
+  "&size=50" +
+  "&apikey=" + API_KEY;
 
 async function run() {
-  const calendar = ical({ name: "BKFC Events (Tapology)" });
+  if (!API_KEY) {
+    throw new Error("Missing TICKETMASTER_API_KEY");
+  }
 
-  const { data: html } = await axios.get(TAPOLOGY_EVENTS_URL, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari",
-      "Accept-Language": "en-US,en;q=0.9"
-    }
-  });
+  const calendar = ical({ name: "BKFC Events" });
 
-  const $ = cheerio.load(html);
+  const res = await fetch(SEARCH_URL);
+  const data = await res.json();
+
+  const events = data?._embedded?.events || [];
 
   let count = 0;
 
-  $("a[href^='/fightcenter/events/']").each((_, el) => {
-    const title = $(el).text().trim();
-    const link = "https://www.tapology.com" + $(el).attr("href");
+  for (const event of events) {
+    const name = event.name;
+    const url = event.url;
 
-    if (!title) return;
+    const startDate = event.dates?.start?.dateTime;
+    const timezone = event.dates?.timezone;
 
-    const row = $(el).closest("tr, li, div");
-    const text = row.text();
+    if (!name || !startDate) continue;
 
-    const dateMatch = text.match(
-      /(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}/
-    );
-
-    if (!dateMatch) return;
-
-    const start = new Date(dateMatch[0]);
-    if (isNaN(start)) return;
-
+    const start = new Date(startDate);
     const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
 
+    const venue = event._embedded?.venues?.[0];
+    const location = venue
+      ? [venue.name, venue.city?.name, venue.state?.stateCode]
+          .filter(Boolean)
+          .join(", ")
+      : "";
+
     calendar.createEvent({
-      summary: title,
+      summary: name,
       start,
       end,
-      description: `Source: Tapology\n\n${link}`,
-      url: link
+      location,
+      description: url,
+      url
     });
 
     count++;
-  });
+  }
 
-  console.log(`Tapology events added: ${count}`);
+  console.log(`Ticketmaster BKFC events added: ${count}`);
 
   fs.mkdirSync("public", { recursive: true });
   fs.writeFileSync("public/BKFC.ics", calendar.toString());
