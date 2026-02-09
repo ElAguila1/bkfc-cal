@@ -1,103 +1,93 @@
+import fs from "fs";
 import fetch from "node-fetch";
 import ical from "ical-generator";
-import fs from "fs";
+import * as cheerio from "cheerio";
 
-const API_KEY = process.env.TICKETMASTER_API_KEY;
+const EVENTS_INDEX =
+  "https://www.tapology.com/fightcenter/events?organization=2682";
 
-if (!API_KEY) {
-  throw new Error("Missing TICKETMASTER_API_KEY");
+async function fetchHTML(url) {
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari",
+      "Accept-Language": "en-US,en;q=0.9"
+    }
+  });
+  return res.text();
 }
 
-const TM_URL =
-  "https://app.ticketmaster.com/discovery/v2/events.json" +
-  "?keyword=BKFC" +
-  "&classificationName=sports" +
-  "&countryCode=US" +
-  "&size=200" +
-  `&apikey=${API_KEY}`;
-
 async function run() {
-  const res = await fetch(TM_URL);
-  const data = await res.json();
+  const calendar = ical({ name: "BKFC Events" });
 
-  if (!data._embedded?.events) {
-    console.log("No Ticketmaster BKFC events found");
-    return;
-  }
+  const indexHTML = await fetchHTML(EVENTS_INDEX);
+  const $ = cheerio.load(indexHTML);
 
-  const cal = ical({
-    name: "BKFC Events",
-    timezone: "UTC"
-  });
-
-  const seen = new Map(); // key → event with preferred time
   let added = 0;
 
-  for (const event of data._embedded.events) {
-    const name = event.name;
-    const dates = event.dates?.start;
-    const venue = event._embedded?.venues?.[0];
+  // Each BKFC event card
+  $(".cc-matchup-event").each(async (_, el) => {
+    const linkEl = $(el).find("a[href^='/fightcenter/events/']");
+    if (!linkEl.length) return;
 
-    if (!name || !dates || !venue) continue;
+    const eventURL =
+      "https://www.tapology.com" + linkEl.attr("href");
 
-    const city = venue.city?.name || "";
-    const localDate = dates.localDate;
-    const hasDateTime = Boolean(dates.dateTime);
+    const title =
+      linkEl.find(".f-site-text--primary").text().trim();
 
-    if (!localDate) continue;
+    const dateText =
+      linkEl.find(".f-site-text--secondary").first().text().trim();
 
-    // Stable identity for deduplication
-    const key = `${name}|${localDate}|${city}`;
+    const location =
+      linkEl.find(".f-site-text--secondary").eq(1).text().trim();
 
-    // If we've already seen this event:
-    if (seen.has(key)) {
-      const existing = seen.get(key);
+    if (!title || !dateText) return;
 
-      // Keep whichever one has dateTime (authoritative)
-      if (!existing.hasDateTime && hasDateTime) {
-        seen.set(key, { event, hasDateTime });
-      }
-      continue;
+    const start = new Date(dateText);
+    if (isNaN(start)) return;
+
+    const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
+
+    // 🔎 Fetch event page to get main event (best effort)
+    let mainEvent = "";
+    try {
+      const eventHTML = await fetchHTML(eventURL);
+      const $$ = cheerio.load(eventHTML);
+
+      const bout = $$("h2, h3")
+        .filter((_, h) =>
+          $$(h).text().toLowerCase().includes("vs")
+        )
+        .first()
+        .text()
+        .trim();
+
+      if (bout) mainEvent = bout;
+    } catch {
+      // ignore enrichment failures
     }
 
-    seen.set(key, { event, hasDateTime });
-  }
+    const summary = mainEvent
+      ? `${title} — ${mainEvent}`
+      : title;
 
-  // Now create calendar events from deduped list
-  for (const { event } of seen.values()) {
-    const dates = event.dates.start;
-    const venue = event._embedded.venues[0];
-
-    let start;
-    let end;
-
-    if (dates.dateTime) {
-      // Authoritative UTC timestamp
-      start = new Date(dates.dateTime);
-      end = new Date(start.getTime() + 4 * 60 * 60 * 1000); // 4 hours
-    } else if (dates.localDate && dates.localTime) {
-      // Fallback (rare)
-      start = new Date(`${dates.localDate}T${dates.localTime}`);
-      end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
-    } else {
-      continue;
-    }
-
-    cal.createEvent({
+    calendar.createEvent({
+      summary,
       start,
       end,
-      summary: event.name,
-      description: event.url,
-      location: `${venue.name}, ${venue.city.name}, ${venue.state?.stateCode || ""}`
+      location,
+      description: eventURL,
+      url: eventURL
     });
 
     added++;
-  }
+  });
 
   fs.mkdirSync("public", { recursive: true });
-  fs.writeFileSync("public/BKFC.ics", cal.toString());
+  fs.writeFileSync("public/BKFC.ics", calendar.toString());
 
-  console.log(`Ticketmaster BKFC events added: ${added}`);
+  console.log(`BKFC events added from Tapology: ${added}`);
 }
 
 run();
