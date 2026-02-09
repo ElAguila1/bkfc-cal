@@ -12,33 +12,34 @@ async function run() {
     headless: true
   });
 
-  const page = await browser.newPage();
+  const page = await browser.newPage({
+    userAgent:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari"
+  });
 
   let eventsData = [];
 
-  // Intercept Tapology's internal JSON
+  // Capture Tapology's JSON responses
   page.on("response", async (response) => {
     try {
-      const url = response.url();
+      const ct = response.headers()["content-type"] || "";
+      if (!ct.includes("application/json")) return;
 
-      if (
-        response.request().method() === "GET" &&
-        url.includes("events") &&
-        response.headers()["content-type"]?.includes("application/json")
-      ) {
-        const json = await response.json();
+      const json = await response.json();
 
-        // Defensive: capture any array that looks like events
-        if (Array.isArray(json?.events)) {
-          eventsData = json.events;
-        }
+      if (Array.isArray(json?.events) && json.events.length) {
+        eventsData = json.events;
       }
     } catch {
       // ignore
     }
   });
 
-  await page.goto(EVENTS_URL, { waitUntil: "networkidle" });
+  // IMPORTANT: do NOT wait for networkidle
+  await page.goto(EVENTS_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+
+  // Give JS time to fire requests
+  await page.waitForTimeout(5000);
 
   if (!eventsData.length) {
     throw new Error("No Tapology events JSON captured");
@@ -50,7 +51,7 @@ async function run() {
     const title = event.name || event.title;
     const dateText = event.date || event.start_date;
     const location = event.location || "";
-    const slug = event.slug || "";
+    const slug = event.slug;
 
     if (!title || !dateText) continue;
 
@@ -61,14 +62,15 @@ async function run() {
 
     let mainEvent = "";
 
-    // Optional enrichment: visit event page
     if (slug) {
       try {
         const eventPage = await browser.newPage();
         await eventPage.goto(
           `https://www.tapology.com/fightcenter/events/${slug}`,
-          { waitUntil: "networkidle" }
+          { waitUntil: "domcontentloaded", timeout: 60000 }
         );
+
+        await eventPage.waitForTimeout(3000);
 
         const bout = await eventPage.evaluate(() => {
           const headers = Array.from(document.querySelectorAll("h2, h3"));
@@ -79,9 +81,10 @@ async function run() {
         });
 
         if (bout) mainEvent = bout;
+
         await eventPage.close();
       } catch {
-        // enrichment failure is non-fatal
+        // enrichment optional
       }
     }
 
