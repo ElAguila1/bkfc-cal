@@ -14,41 +14,43 @@ async function run() {
 
   const page = await browser.newPage();
 
-  let eventsData = null;
+  let eventsData = [];
 
-  // 🔴 This is the key: listen for the JSON Tapology uses
+  // Intercept Tapology's internal JSON
   page.on("response", async (response) => {
-    const url = response.url();
+    try {
+      const url = response.url();
 
-    if (
-      url.includes("/api/") &&
-      url.includes("events") &&
-      response.request().method() === "GET"
-    ) {
-      try {
+      if (
+        response.request().method() === "GET" &&
+        url.includes("events") &&
+        response.headers()["content-type"]?.includes("application/json")
+      ) {
         const json = await response.json();
-        if (json && Array.isArray(json.events)) {
+
+        // Defensive: capture any array that looks like events
+        if (Array.isArray(json?.events)) {
           eventsData = json.events;
         }
-      } catch {
-        // ignore non-JSON responses
       }
+    } catch {
+      // ignore
     }
   });
 
   await page.goto(EVENTS_URL, { waitUntil: "networkidle" });
 
-  if (!eventsData || eventsData.length === 0) {
-    throw new Error("Failed to capture Tapology events JSON");
+  if (!eventsData.length) {
+    throw new Error("No Tapology events JSON captured");
   }
 
   let added = 0;
 
   for (const event of eventsData) {
-    const title = event.name;
-    const dateText = event.date;
-    const location = event.location;
-    const eventURL = `https://www.tapology.com/fightcenter/events/${event.slug}`;
+    const title = event.name || event.title;
+    const dateText = event.date || event.start_date;
+    const location = event.location || "";
+    const slug = event.slug || "";
 
     if (!title || !dateText) continue;
 
@@ -57,25 +59,30 @@ async function run() {
 
     const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
 
-    // Optional: fetch event page to extract main event
     let mainEvent = "";
-    try {
-      const eventPage = await browser.newPage();
-      await eventPage.goto(eventURL, { waitUntil: "networkidle" });
 
-      const bout = await eventPage.evaluate(() => {
-        const headings = Array.from(document.querySelectorAll("h2, h3"));
-        const vs = headings.find(h =>
-          h.textContent.toLowerCase().includes(" vs ")
+    // Optional enrichment: visit event page
+    if (slug) {
+      try {
+        const eventPage = await browser.newPage();
+        await eventPage.goto(
+          `https://www.tapology.com/fightcenter/events/${slug}`,
+          { waitUntil: "networkidle" }
         );
-        return vs ? vs.textContent.trim() : "";
-      });
 
-      if (bout) mainEvent = bout;
+        const bout = await eventPage.evaluate(() => {
+          const headers = Array.from(document.querySelectorAll("h2, h3"));
+          const found = headers.find(h =>
+            h.textContent.toLowerCase().includes(" vs ")
+          );
+          return found ? found.textContent.trim() : "";
+        });
 
-      await eventPage.close();
-    } catch {
-      // enrichment optional
+        if (bout) mainEvent = bout;
+        await eventPage.close();
+      } catch {
+        // enrichment failure is non-fatal
+      }
     }
 
     const summary = mainEvent
@@ -87,8 +94,12 @@ async function run() {
       start,
       end,
       location,
-      description: eventURL,
-      url: eventURL
+      description: slug
+        ? `https://www.tapology.com/fightcenter/events/${slug}`
+        : "",
+      url: slug
+        ? `https://www.tapology.com/fightcenter/events/${slug}`
+        : ""
     });
 
     added++;
