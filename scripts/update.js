@@ -23,33 +23,38 @@ async function run() {
   const indexHTML = await fetchHTML(EVENTS_INDEX);
   const $ = cheerio.load(indexHTML);
 
+  const links = $("a[href^='/fightcenter/events/']").toArray();
+
   let added = 0;
+  const seen = new Set();
 
-  // Each BKFC event card
-  $(".cc-matchup-event").each(async (_, el) => {
-    const linkEl = $(el).find("a[href^='/fightcenter/events/']");
-    if (!linkEl.length) return;
+  for (const el of links) {
+    const linkEl = $(el);
+    const eventURL = "https://www.tapology.com" + linkEl.attr("href");
 
-    const eventURL =
-      "https://www.tapology.com" + linkEl.attr("href");
+    // Avoid duplicates
+    if (seen.has(eventURL)) continue;
+    seen.add(eventURL);
 
-    const title =
-      linkEl.find(".f-site-text--primary").text().trim();
+    const container = linkEl.closest("div, li");
+    const text = container.text();
 
-    const dateText =
-      linkEl.find(".f-site-text--secondary").first().text().trim();
+    // Extract title
+    const title = linkEl.text().trim();
+    if (!title) continue;
 
-    const location =
-      linkEl.find(".f-site-text--secondary").eq(1).text().trim();
+    // Extract date like "Sat, Feb 7, 2026"
+    const dateMatch = text.match(
+      /(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}/
+    );
+    if (!dateMatch) continue;
 
-    if (!title || !dateText) return;
-
-    const start = new Date(dateText);
-    if (isNaN(start)) return;
+    const start = new Date(dateMatch[0]);
+    if (isNaN(start)) continue;
 
     const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
 
-    // 🔎 Fetch event page to get main event (best effort)
+    // Try to get main event
     let mainEvent = "";
     try {
       const eventHTML = await fetchHTML(eventURL);
@@ -65,7 +70,7 @@ async function run() {
 
       if (bout) mainEvent = bout;
     } catch {
-      // ignore enrichment failures
+      // enrichment optional
     }
 
     const summary = mainEvent
@@ -76,13 +81,12 @@ async function run() {
       summary,
       start,
       end,
-      location,
       description: eventURL,
       url: eventURL
     });
 
     added++;
-  });
+  }
 
   fs.mkdirSync("public", { recursive: true });
   fs.writeFileSync("public/BKFC.ics", calendar.toString());
